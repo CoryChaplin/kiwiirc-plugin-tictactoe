@@ -8,6 +8,40 @@ kiwi.plugin('tictactoe', (kiwi) => {
 
     kiwi.addUi('header_query', GameButton);
 
+    kiwi.on('input.command.tictactoe', (eventObj, command, params, context) => {
+        eventObj.handled = true;
+        const { network, buffer } = context;
+        if (!network || !buffer) return;
+        const nick = (params || '').trim();
+        if (!nick) {
+            kiwi.state.addMessage(buffer, { nick: '*', message: 'Usage: /tictactoe <nick>', type: 'error' });
+            return;
+        }
+        if (nick === network.nick) {
+            kiwi.state.addMessage(buffer, { nick: '*', message: 'You cannot invite yourself to play Tic-Tac-Toe.', type: 'error' });
+            return;
+        }
+        const targetBuffer = kiwi.state.getOrAddBufferByName(network.id, nick);
+        if (!Utils.getGame(nick)) {
+            Utils.newGame(network, network.nick, nick);
+        }
+        const game = Utils.getGame(nick);
+        if ((game.getShowGame() && !game.getGameOver()) || game.getInviteSent()) {
+            kiwi.state.addMessage(buffer, { nick: '*', message: 'A game or invite is already active with ' + nick + '.', type: 'error' });
+            return;
+        }
+        game.setInviteSent(true);
+        if (!game.getInviteTimeout()) {
+            game.setInviteTimeout(window.setTimeout(() => {
+                game.setInviteTimeout(null);
+                game.setInviteSent(false);
+                kiwi.state.addMessage(targetBuffer, { nick: '*', message: 'The invite to ' + nick + ' timed out.', type: 'message' });
+            }, 4000));
+        }
+        Utils.sendData(network, nick, { cmd: 'invite' });
+        kiwi.state.addMessage(targetBuffer, { nick: '*', message: nick + ' has been invited to play Tic-Tac-Toe!', type: 'message' });
+    });
+
     // Listen to incoming messages
     kiwi.on('irc.raw.TAGMSG', (command, event, network) => {
         if (event.params[0] !== network.nick ||
@@ -78,7 +112,7 @@ kiwi.plugin('tictactoe', (kiwi) => {
                 if (game.getGameTurn() !== data.turn) {
                     game.setGameOver(true);
                     let message = 'Error: Game turn out of sync :(';
-                    game.setGameMessage = message;
+                    game.setGameMessage(message);
                     Utils.sendData(network, game.getRemotePlayer(), { cmd: 'error', message: message });
                 } else {
                     game.incrementGameTurn();
